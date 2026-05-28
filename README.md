@@ -27,6 +27,10 @@ Most AI explanation tools don't work on PDFs. Existing tools like Explain AI bre
 Download the latest release from the [Releases](https://github.com/frayyan-rgb/Folio/releases) page.
 
 > On Mac, right-click the app and select Open if you see an unverified developer warning.
+> If you see "app is damaged" on Mac:
+1. Open Terminal
+2. Run: xattr -d com.apple.quarantine /path/to/Folio.app (replace with file path)
+3. Try opening again
 
 ## Development
 ```bash
