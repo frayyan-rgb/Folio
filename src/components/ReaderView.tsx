@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { Document, Page } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -15,6 +15,7 @@ export default function ReaderView({ file, onBack }: Props) {
   const [scale, setScale] = useState(1.0);
   const [pageLoaded, setPageLoaded] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [pageLines, setPageLines] = useState<string[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,16 +29,26 @@ export default function ReaderView({ file, onBack }: Props) {
       setPageNum(page);
       setPageLoaded(true);
     });
-  }, []);
+  }, [file.name]);
 
   useEffect(() => {
     if (pageLoaded && pageNum > 0) {
       window.electron.savePage(file.name, pageNum);
     }
-  }, [pageNum, pageLoaded]);
+  }, [file.name, pageNum, pageLoaded]);
 
-  const goToPrevPage = () => setPageNum((p) => Math.max(p - 1, 1));
-  const goToNextPage = () => setPageNum((p) => Math.min(p + 1, totalPages));
+  useEffect(() => {
+    setPageLines([]);
+  }, [file.name, pageNum]);
+
+  const goToPrevPage = useCallback(
+    () => setPageNum((p) => Math.max(p - 1, 1)),
+    [],
+  );
+  const goToNextPage = useCallback(
+    () => setPageNum((p) => Math.min(p + 1, totalPages)),
+    [totalPages],
+  );
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") goToPrevPage();
@@ -46,14 +57,14 @@ export default function ReaderView({ file, onBack }: Props) {
 
     window.addEventListener("keydown", handleKeyDown); // this basically means that everytime a user presses a key the function handleKeyDown runs
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [pageNum, totalPages]);
+  }, [goToNextPage, goToPrevPage]);
 
   return (
     <div
       className="min-h-screen flex flex-col"
       style={{ backgroundColor: "#1a1a1a" }}
     >
-      <SaveHighlighted />
+      <SaveHighlighted pageLines={pageLines} />
 
       {/* Header */}
       <div
@@ -153,6 +164,34 @@ export default function ReaderView({ file, onBack }: Props) {
             pageNumber={pageNum}
             width={containerWidth ? containerWidth * 0.85 : undefined}
             scale={scale}
+            onGetTextSuccess={({ items }) => {
+              const lines: string[] = [];
+              let currentLine = "";
+
+              for (const item of items) {
+                if (!("str" in item)) continue;
+
+                const text = item.str.trim();
+
+                if (text) {
+                  currentLine += `${currentLine ? " " : ""}${text}`;
+                }
+
+                if (item.hasEOL) {
+                  if (currentLine) {
+                    lines.push(currentLine);
+                  }
+
+                  currentLine = "";
+                }
+              }
+
+              if (currentLine) {
+                lines.push(currentLine);
+              }
+
+              setPageLines(lines);
+            }}
           />
         </Document>
       </div>

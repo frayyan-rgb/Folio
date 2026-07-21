@@ -1,45 +1,35 @@
 import { useEffect, useState } from "react";
 import ExplainButton from "./ExplainButton";
 
-const getSurroundingText = (selectedText: string) => {
-  const cleaned = selectedText.replace(/\s+/g, " ").trim();
-  const spans = document.querySelectorAll(".textLayer span");
-  const uniqueTexts = [
-    ...new Set(Array.from(spans).map((s) => s.textContent || "")),
-  ];
-  const pageText = uniqueTexts.join(" ").replace(/\s+/g, " ").trim();
-
-  let start = 0;
-  let end = pageText.length;
-
-  const index = pageText.indexOf(cleaned);
-  if (index !== -1) {
-    start = Math.max(0, index - 300);
-    end = Math.min(pageText.length, index + cleaned.length + 300);
-  } else {
-    const firstWord = cleaned.split(" ")[0];
-    const fallbackIndex = pageText.indexOf(firstWord);
-    if (fallbackIndex !== -1) {
-      start = Math.max(0, fallbackIndex - 300);
-      end = Math.min(pageText.length, fallbackIndex + 600);
-    } else {
-      return cleaned;
-    }
-  }
-
-  let chunk = pageText.slice(start, end);
-
-  // trim to nearest sentence start — find ". " and start after it
-  const sentenceStartMatch = chunk.search(/[.!?]\s*[A-Z]/);
-  if (sentenceStartMatch !== -1 && sentenceStartMatch < 300) {
-    const capitalPos = chunk.slice(sentenceStartMatch).search(/[A-Z]/);
-    chunk = chunk.slice(sentenceStartMatch + capitalPos);
-  }
-
-  return chunk;
+type Props = {
+  pageLines: string[];
 };
 
-const SaveHighlighted = () => {
+const normaliseText = (text: string) => text.replace(/\s+/g, " ").trim();
+
+const getSurroundingText = (selectedText: string, pageLines: string[]) => {
+  const cleaned = selectedText.replace(/\s+/g, " ").trim();
+  const firstWord = cleaned.split(" ")[0];
+  const selectedLineIndex = pageLines.findIndex((line) => {
+    const normalisedLine = normaliseText(line);
+    return normalisedLine.includes(cleaned) || normalisedLine.includes(firstWord);
+  });
+
+  if (selectedLineIndex === -1) return cleaned;
+
+  const linesBefore = 4;
+  const linesAfter = 4;
+  const start = Math.max(0, selectedLineIndex - linesBefore);
+  const end = Math.min(pageLines.length, selectedLineIndex + linesAfter + 1);
+  const primaryLine = pageLines[selectedLineIndex];
+  const nearbyLines = pageLines
+    .slice(start, end)
+    .filter((_, index) => start + index !== selectedLineIndex);
+
+  return `Primary line:\n${primaryLine}\n\nNearby context:\n${nearbyLines.join("\n")}`;
+};
+
+const SaveHighlighted = ({ pageLines }: Props) => {
   const [popup, setPopup] = useState<{
     text: string;
     x: number;
@@ -48,20 +38,27 @@ const SaveHighlighted = () => {
   } | null>(null);
 
   useEffect(() => {
-    const handleMouseUp = () => {
+    const isInsideExplainPopup = (target: EventTarget | null) =>
+      target instanceof Element && Boolean(target.closest(".folio-explain-popup"));
+
+    const handleMouseUp = (event: MouseEvent) => {
+      if (isInsideExplainPopup(event.target)) return;
+
       const selection = window.getSelection();
       const text = selection?.toString().replace(/\s+/g, " ").trim();
       if (text && text.length > 0) {
         if (selection) {
           const range = selection.getRangeAt(0);
           const rect = range.getBoundingClientRect();
-          const surrounding = getSurroundingText(text);
+          const surrounding = getSurroundingText(text, pageLines);
           setPopup({ text, x: rect.x, y: rect.y, surrounding });
         }
       }
     };
 
-    const handleClick = () => {
+    const handleClick = (event: MouseEvent) => {
+      if (isInsideExplainPopup(event.target)) return;
+
       const selection = window.getSelection();
       const text = selection?.toString().trim();
       if (!text || text.length === 0) {
@@ -76,7 +73,7 @@ const SaveHighlighted = () => {
       document.removeEventListener("mouseup", handleMouseUp);
       document.removeEventListener("click", handleClick);
     };
-  }, []);
+  }, [pageLines]);
 
   return (
     <>

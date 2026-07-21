@@ -15,6 +15,10 @@ dist-ssr
 node_modules/
 dist/
 out/
+
+# Vendored llama.cpp source and local build artifacts. The packaged runtime in
+# resources/llama is intentionally tracked separately.
+llama.cpp/
 .env
 
 

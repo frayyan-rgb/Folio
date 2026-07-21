@@ -12,4 +12,32 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.invoke("save-image", buffer, fileName),
   getImage: (fileName) => ipcRenderer.invoke("get-image", fileName),
   deleteBook: (fileName) => ipcRenderer.invoke("delete-book", fileName),
+  saveApiKey: (apiKey) => ipcRenderer.invoke("save-api-key", apiKey),
+  getApiKey: () => ipcRenderer.invoke("get-api-key"),
+  deleteImage: (fileName) => ipcRenderer.invoke("delete-image", fileName),
+  explainText: (text, surrounding) =>
+    ipcRenderer.invoke("explain-text", text, surrounding),
+  askFollowUp: (text, surrounding, explanation, history, question) =>
+    ipcRenderer.invoke(
+      "ask-follow-up",
+      text,
+      surrounding,
+      explanation,
+      history,
+      question,
+    ),
+  getLocalAIStatus: () => ipcRenderer.invoke("get-local-ai-status"),
+  getLocalAIModels: () => ipcRenderer.invoke("get-local-ai-models"),
+  setSelectedLocalAIModel: (modelId) =>
+    ipcRenderer.invoke("set-selected-local-ai-model", modelId),
+  loadLocalAI: (modelId) => ipcRenderer.invoke("load-local-ai", modelId),
+  unloadLocalAI: () => ipcRenderer.invoke("unload-local-ai"),
+  deleteLocalAIModel: (modelId) =>
+    ipcRenderer.invoke("delete-local-ai-model", modelId),
+  onLocalAIDownloadProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("local-ai-download-progress", listener);
+
+    return () => ipcRenderer.removeListener("local-ai-download-progress", listener);
+  },
 });
