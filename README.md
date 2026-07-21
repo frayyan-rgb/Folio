@@ -1,8 +1,39 @@
-# Folio
+# Folio 📖
 
-Folio is a desktop PDF library built with Electron, React, and TypeScript. It
-stores books and reading progress locally, supports custom cover images, and can
-explain highlighted passages using an on-device language model.
+Folio is a privacy-first desktop PDF reading companion built with Electron,
+React, and TypeScript. It manages a personal library, remembers reading
+progress, and explains highlighted passages using an on-device language model.
+
+## Features
+
+- Persistent local PDF library and per-book reading progress
+- Custom book cover images
+- Page navigation by keyboard, controls, or page number
+- Zoom from 50% to 300%
+- Context-aware explanations and conversational follow-up questions
+- Two selectable local Qwen models with download and lifecycle management
+- Dark desktop interface
+
+## Tech stack
+
+- Electron, React, TypeScript, and Vite
+- react-pdf and PDF.js
+- Tailwind CSS and shadcn/ui
+- llama.cpp with Qwen GGUF models
+- Local file storage through typed Electron IPC
+
+## Installation
+
+Download the latest build from the
+[Releases](https://github.com/frayyan-rgb/Folio/releases) page.
+
+On macOS, right-click the app and select **Open** if Gatekeeper shows an
+unverified developer warning. If macOS reports that the app is damaged, remove
+its quarantine attribute and try again:
+
+```bash
+xattr -d com.apple.quarantine /path/to/Folio.app
+```
 
 ## Development
 
@@ -11,5 +42,12 @@ npm install
 npm run start
 ```
 
-Use `npm run build` for a production web build, `npm run lint` for static
-checks, and `npm run make` to create an Electron distributable.
+## Building
+
+```bash
+npm run build
+npm run make -- --arch arm64
+```
+
+The packaged macOS ARM64 build includes the native llama.cpp server. Model
+weights are downloaded from the model selector when local AI is first enabled.
