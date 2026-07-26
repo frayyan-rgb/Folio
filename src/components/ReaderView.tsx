@@ -15,7 +15,7 @@ export default function ReaderView({ file, onBack }: Props) {
   const [scale, setScale] = useState(1.0);
   const [pageLoaded, setPageLoaded] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
-  const [pageLines, setPageLines] = useState<string[]>([]);
+  const [pageText, setPageText] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function ReaderView({ file, onBack }: Props) {
   }, [file.name, pageNum, pageLoaded]);
 
   useEffect(() => {
-    setPageLines([]);
+    setPageText("");
   }, [file.name, pageNum]);
 
   const goToPrevPage = useCallback(
@@ -64,7 +64,7 @@ export default function ReaderView({ file, onBack }: Props) {
       className="min-h-screen flex flex-col"
       style={{ backgroundColor: "#1a1a1a" }}
     >
-      <SaveHighlighted pageLines={pageLines} />
+      <SaveHighlighted pageText={pageText} bookId={file.name} pageNumber={pageNum} />
 
       {/* Header */}
       <div
@@ -165,32 +165,10 @@ export default function ReaderView({ file, onBack }: Props) {
             width={containerWidth ? containerWidth * 0.85 : undefined}
             scale={scale}
             onGetTextSuccess={({ items }) => {
-              const lines: string[] = [];
-              let currentLine = "";
-
-              for (const item of items) {
-                if (!("str" in item)) continue;
-
-                const text = item.str.trim();
-
-                if (text) {
-                  currentLine += `${currentLine ? " " : ""}${text}`;
-                }
-
-                if (item.hasEOL) {
-                  if (currentLine) {
-                    lines.push(currentLine);
-                  }
-
-                  currentLine = "";
-                }
-              }
-
-              if (currentLine) {
-                lines.push(currentLine);
-              }
-
-              setPageLines(lines);
+              const text = items
+                .flatMap((item) => ("str" in item ? [item.str] : []))
+                .join(" ");
+              setPageText(text);
             }}
           />
         </Document>

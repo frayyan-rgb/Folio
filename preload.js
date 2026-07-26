@@ -12,11 +12,14 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.invoke("save-image", buffer, fileName),
   getImage: (fileName) => ipcRenderer.invoke("get-image", fileName),
   deleteBook: (fileName) => ipcRenderer.invoke("delete-book", fileName),
-  saveApiKey: (apiKey) => ipcRenderer.invoke("save-api-key", apiKey),
-  getApiKey: () => ipcRenderer.invoke("get-api-key"),
+  saveAnnotation: (bookId, annotation) =>
+    ipcRenderer.invoke("save-annotation", bookId, annotation),
+  getAnnotations: (bookId) => ipcRenderer.invoke("get-annotations", bookId),
+  deleteAnnotation: (bookId, annotationId) =>
+    ipcRenderer.invoke("delete-annotation", bookId, annotationId),
   deleteImage: (fileName) => ipcRenderer.invoke("delete-image", fileName),
-  explainText: (text, surrounding) =>
-    ipcRenderer.invoke("explain-text", text, surrounding),
+  explainText: (text, surrounding, contextEnabled) =>
+    ipcRenderer.invoke("explain-text", text, surrounding, contextEnabled),
   askFollowUp: (text, surrounding, explanation, history, question) =>
     ipcRenderer.invoke(
       "ask-follow-up",

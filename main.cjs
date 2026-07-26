@@ -2,31 +2,32 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
 const fs = require("fs");
 const { spawn } = require("node:child_process");
+const { randomUUID } = require("node:crypto");
 const isDev = !app.isPackaged;
 const LOCAL_AI_BASE_URL = "http://127.0.0.1:8080";
 const LOCAL_AI_MODELS = {
-  "qwen-4b": {
-    id: "qwen-4b",
-    name: "Recommended — Qwen 3.5 4B",
-    size: "1.94 GB",
-    fileName: "Qwen3.5-4B-UD-Q2_K_XL.gguf",
+  "gemma-4-e4b": {
+    id: "gemma-4-e4b",
+    name: "Recommended — Gemma 4 E4B QAT",
+    size: "4.2 GB",
+    fileName: "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
     downloadUrl:
-      "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-UD-Q2_K_XL.gguf?download=true",
-    advantage: "More accurate explanations and stronger context handling.",
-    drawback: "Larger download and uses more memory.",
+      "https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/main/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf?download=true",
+    advantage: "Best explanation quality with a smaller QAT download.",
+    drawback: "Larger download and needs more memory.",
   },
-  "qwen-0.8b": {
-    id: "qwen-0.8b",
-    name: "Lite — Qwen 3.5 0.8B",
-    size: "812 MB",
-    fileName: "Qwen3.5-0.8B-Q8_0.gguf",
+  "gemma-4-e2b": {
+    id: "gemma-4-e2b",
+    name: "Lite — Gemma 4 E2B",
+    size: "2.8 GB",
+    fileName: "gemma-4-E2B-it-Q4_0.gguf",
     downloadUrl:
-      "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q8_0.gguf?download=true",
-    advantage: "Much smaller download and faster to load.",
+      "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_0.gguf?download=true",
+    advantage: "Smaller download with solid everyday explanations.",
     drawback: "Less reliable with dense or ambiguous academic passages.",
   },
 };
-const DEFAULT_LOCAL_AI_MODEL_ID = "qwen-4b";
+const DEFAULT_LOCAL_AI_MODEL_ID = "gemma-4-e4b";
 
 let localAIProcess = null;
 let localAIStartupProgress = null;
@@ -79,6 +80,29 @@ function createWindow() {
   } else {
     win.loadFile(path.join(__dirname, "dist/index.html"));
   }
+}
+
+function getAnnotationsPath(bookId) {
+  const annotationsDir = path.join(app.getPath("userData"), "annotations");
+  return path.join(annotationsDir, `${encodeURIComponent(bookId)}.json`);
+}
+
+function readAnnotations(bookId) {
+  const annotationsPath = getAnnotationsPath(bookId);
+  if (!fs.existsSync(annotationsPath)) return [];
+
+  try {
+    const annotations = JSON.parse(fs.readFileSync(annotationsPath, "utf8"));
+    return Array.isArray(annotations) ? annotations : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeAnnotations(bookId, annotations) {
+  const annotationsPath = getAnnotationsPath(bookId);
+  fs.mkdirSync(path.dirname(annotationsPath), { recursive: true });
+  fs.writeFileSync(annotationsPath, JSON.stringify(annotations, null, 2));
 }
 
 app.whenReady().then(() => {
@@ -157,19 +181,62 @@ ipcMain.handle("read-book", async (event, filePath) => {
 ipcMain.handle("delete-book", async (event, fileName) => {
   const booksDir = path.join(app.getPath("userData"), "books");
   fs.unlinkSync(path.join(booksDir, fileName));
+  const annotationsPath = getAnnotationsPath(fileName);
+  if (fs.existsSync(annotationsPath)) fs.unlinkSync(annotationsPath);
 });
 
-ipcMain.handle("save-api-key", async (event, apiKey) => {
-  const settingsPath = path.join(app.getPath("userData"), "settings.json");
-  fs.writeFileSync(settingsPath, JSON.stringify({ apiKey }));
+ipcMain.handle("save-annotation", async (_event, bookId, annotation) => {
+  if (!bookId || typeof bookId !== "string") {
+    throw new Error("A book ID is required to save an annotation.");
+  }
+
+  const requiredFields = [
+    "pageNumber",
+    "selectedText",
+    "explanation",
+    "startItemIndex",
+    "startOffset",
+    "endItemIndex",
+    "endOffset",
+  ];
+  if (
+    !annotation ||
+    requiredFields.some((field) => annotation[field] === undefined || annotation[field] === null)
+  ) {
+    throw new Error("Annotation is missing required fields.");
+  }
+
+  const record = {
+    id: randomUUID(),
+    bookId,
+    pageNumber: annotation.pageNumber,
+    selectedText: annotation.selectedText,
+    explanation: annotation.explanation,
+    contextEnabled: Boolean(annotation.contextEnabled),
+    startItemIndex: annotation.startItemIndex,
+    startOffset: annotation.startOffset,
+    endItemIndex: annotation.endItemIndex,
+    endOffset: annotation.endOffset,
+    createdAt: new Date().toISOString(),
+  };
+  const annotations = readAnnotations(bookId);
+  annotations.push(record);
+  writeAnnotations(bookId, annotations);
+  return record;
+});
+
+ipcMain.handle("get-annotations", async (_event, bookId) => {
+  if (!bookId || typeof bookId !== "string") return [];
+  return readAnnotations(bookId);
+});
+
+ipcMain.handle("delete-annotation", async (_event, bookId, annotationId) => {
+  const annotations = readAnnotations(bookId);
+  const remainingAnnotations = annotations.filter(
+    (annotation) => annotation.id !== annotationId,
+  );
+  writeAnnotations(bookId, remainingAnnotations);
   return { success: true };
-});
-
-ipcMain.handle("get-api-key", async () => {
-  const settingsPath = path.join(app.getPath("userData"), "settings.json");
-  if (!fs.existsSync(settingsPath)) return null;
-  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-  return settings.apiKey || null;
 });
 
 ipcMain.handle("delete-image", async (event, fileName) => {
@@ -178,9 +245,8 @@ ipcMain.handle("delete-image", async (event, fileName) => {
   return { success: true };
 });
 
-ipcMain.handle("explain-text", async (_event, text, surrounding) => {
-  console.log("Selected text:", text);
-  console.log("Surrounding context:", surrounding);
+ipcMain.handle("explain-text", async (_event, text, surrounding, contextEnabled) => {
+  const contextualMode = Boolean(contextEnabled);
   const response = await fetch(`${LOCAL_AI_BASE_URL}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -192,15 +258,17 @@ ipcMain.handle("explain-text", async (_event, text, surrounding) => {
         {
           role: "system",
           content:
-            "You are Folio's reading assistant. Explain the selected text in simple language. The Primary line contains the selected text and is the source of truth for its meaning. Nearby context is only supporting information and may be unrelated. Do not combine facts, people, or events from different lines unless the Primary line explicitly connects them. Do not invent examples, studies, student actions, qualities, outcomes, comparisons, or benefits. Do not infer that something replaces, bypasses, causes, improves, or leads to something else unless the passage explicitly says so. When the passage reports categories, percentages, or survey results, preserve what they state without assigning extra meaning to a category; for example, do not assume leisure time means non-academic use. Keep important numbers when they are central to the selected text. If the passage makes a general claim, keep your explanation general; do not turn it into a specific scenario. Start directly with what the passage means. Do not mention the selected text, the primary line, nearby context, or the process of explaining it. Do not add facts that the passage does not state. Respond in 2-3 sentences without markdown or bullet points.",
+            "You are Folio's reading assistant. Explain the Primary text in simple language. When a Usage sentence is supplied, contextual mode is enabled. In contextual mode, explain what the Primary text means in that specific sentence, what role it plays in the author's point, and how the nearby sentences help clarify or develop that point. Preserve concrete details, distinctions, and relationships stated in the passage. Do not give a generic dictionary definition, repeat the passage without explaining it, or add unrelated facts and examples. Keep every contextual claim grounded in the supplied passage evidence. Respond to contextual requests in 3-4 cohesive sentences. When no Usage sentence is supplied, give a clear, accurate general definition or explanation using reliable general knowledge in 1-2 sentences. Start directly with the explanation. Do not mention the selected text, the primary text, usage sentence, nearby sentences, context mode, or the process of explaining it. Do not use markdown or bullet points.",
         },
         {
           role: "user",
-          content: `Selected text:\n${text}\n\nStructured context:\n${surrounding}`,
+          content: contextualMode
+            ? `Task: Give a context-specific explanation. Use the Usage sentence to explain what the selected expression means or does in this passage. Your answer must describe its role in that sentence, not give a standalone dictionary definition.\n\nSelected text:\n${text}\n\nPassage evidence:\n${surrounding}`
+            : `Task: Give a concise, accurate definition or explanation of the selected text. You may use general knowledge because no passage context is enabled.\n\nSelected text:\n${text}`,
         },
       ],
       temperature: 0.2,
-      max_tokens: 180,
+      max_tokens: contextualMode ? 320 : 180,
     }),
   });
 
@@ -459,6 +527,7 @@ ipcMain.handle("load-local-ai", async (_event, modelId) => {
       "8192",
       "--n-gpu-layers",
       "99",
+      "--jinja",
       "--reasoning",
       "off",
     ],

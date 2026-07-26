@@ -1,3 +1,19 @@
+type Annotation = {
+  id: string;
+  bookId: string;
+  pageNumber: number;
+  selectedText: string;
+  explanation: string;
+  contextEnabled: boolean;
+  startItemIndex: number;
+  startOffset: number;
+  endItemIndex: number;
+  endOffset: number;
+  createdAt: string;
+};
+
+type NewAnnotation = Omit<Annotation, "id" | "bookId" | "createdAt">;
+
 interface Window {
   electron: {
     saveBook: (
@@ -14,10 +30,18 @@ interface Window {
     saveImage: (buffer: number[], fileName: string) => Promise<string>;
     getImage: (fileName: string) => Promise<number[] | null>;
     deleteBook: (fileName: string) => Promise<{ success: boolean }>;
-    saveApiKey: (apiKey: string) => Promise<{ success: boolean }>;
-    getApiKey: () => Promise<string | null>;
+    saveAnnotation: (bookId: string, annotation: NewAnnotation) => Promise<Annotation>;
+    getAnnotations: (bookId: string) => Promise<Annotation[]>;
+    deleteAnnotation: (
+      bookId: string,
+      annotationId: string,
+    ) => Promise<{ success: boolean }>;
     deleteImage: (fileName: string) => Promise<{ success: boolean }>;
-    explainText: (text: string, surrounding: string) => Promise<string>;
+    explainText: (
+      text: string,
+      surrounding: string,
+      contextEnabled: boolean,
+    ) => Promise<string>;
     askFollowUp: (
       text: string,
       surrounding: string,

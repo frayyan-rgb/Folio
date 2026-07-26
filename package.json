@@ -1,7 +1,8 @@
 {
-  "name": "my-app",
+  "name": "folio",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.1.0",
+  "productName": "Folio",
   "type": "module",
   "main": "main.cjs",
   "scripts": {

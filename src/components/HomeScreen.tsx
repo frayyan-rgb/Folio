@@ -27,7 +27,7 @@ export default function HomeScreen({ onSelectBook }: Props) {
   const [books, setBooks] = useState<Book[]>([]);
   const [localAIStatus, setLocalAIStatus] = useState<LocalAIStatus>("none");
   const [models, setModels] = useState<LocalAIModel[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState("qwen-4b");
+  const [selectedModelId, setSelectedModelId] = useState("gemma-4-e4b");
   const [isLoadingModel, setIsLoadingModel] = useState(false);
   const [isUnloadingModel, setIsUnloadingModel] = useState(false);
   const [isDeletingModel, setIsDeletingModel] = useState(false);
@@ -40,13 +40,6 @@ export default function HomeScreen({ onSelectBook }: Props) {
     completedBytes: number | null;
     totalBytes: number | null;
   }>({ completedBytes: null, totalBytes: null });
-  const [showApiModal, setShowApiModal] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const handleSaveApiKey = async () => {
-    await window.electron.saveApiKey(apiKey);
-    setShowApiModal(false);
-  };
-
   const deleteImage = async (fileName: string) => {
     await window.electron.deleteImage(fileName);
     setBooks(
@@ -499,52 +492,6 @@ export default function HomeScreen({ onSelectBook }: Props) {
         ))}
       </div>
 
-      {showApiModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div
-            className="rounded-2xl p-6 w-96"
-            style={{ backgroundColor: "#2a2a2a", border: "1px solid #444" }}
-          >
-            <h2
-              className="text-lg font-semibold mb-1"
-              style={{ color: "#f0f0f0" }}
-            >
-              OpenRouter API Key
-            </h2>
-            <p className="text-xs mb-4" style={{ color: "#888" }}>
-              Your key is saved locally and never leaves your device.
-            </p>
-            <input
-              type="password"
-              placeholder="sk-or-..."
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="w-full rounded-lg px-3 py-2 text-sm mb-4 outline-none"
-              style={{
-                backgroundColor: "#3a3a3a",
-                color: "#f0f0f0",
-                border: "1px solid #555",
-              }}
-            />
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setShowApiModal(false)}
-                className="px-4 py-2 text-sm rounded-lg"
-                style={{ backgroundColor: "#3a3a3a", color: "#888" }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveApiKey}
-                className="px-4 py-2 text-sm rounded-lg font-medium"
-                style={{ backgroundColor: "#fff", color: "#111" }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
