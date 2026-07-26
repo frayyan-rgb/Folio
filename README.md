@@ -27,6 +27,11 @@ On macOS, the data is normally stored under
 explanations, downloaded models, and the selected model remain available after
 you close and reopen the app. A model must be loaded again after each launch.
 
+Within that folder, Folio stores imported PDFs in `books/`, custom covers in
+`images/`, reading positions in `progress.json`, highlights and explanations in
+`annotations/`, downloaded AI models in `models/`, and the selected model in
+`local-ai-settings.json`.
+
 The first time you enable local AI, Folio downloads your selected model. The
 available models are:
 
