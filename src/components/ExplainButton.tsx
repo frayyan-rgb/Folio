@@ -368,7 +368,7 @@ const ExplainButton = ({
           {errorMessage && (
             <div
               role="alert"
-              className="mx-2 mb-2 mt-1 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100"
+              className="mx-2 mb-2 mt-1 rounded-lg border border-[color:rgba(154,68,63,0.45)] bg-[color:rgba(154,68,63,0.12)] p-3 text-xs leading-5 text-[var(--folio-accent-strong)]"
             >
               {errorMessage}
             </div>

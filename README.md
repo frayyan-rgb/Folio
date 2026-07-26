@@ -48,9 +48,22 @@ available models are:
 Download a release from the
 [Folio releases page](https://github.com/frayyan-rgb/Folio/releases).
 
-On macOS, right-click the app and choose **Open** if Gatekeeper reports that
-the developer cannot be verified. If macOS says the app is damaged, remove its
-quarantine attribute and open it again:
+### Opening Folio on macOS
+
+Folio is an independent app and is not Apple-notarized, so macOS may show a
+security warning the first time you open it. This is a one-time step:
+
+1. Move `Folio.app` to your **Applications** folder and try to open it.
+2. When macOS says it cannot verify the developer, choose **Done**.
+3. Open **System Settings** → **Privacy & Security**.
+4. Scroll down and click **Open Anyway** next to the Folio message.
+5. Click **Open** in the confirmation dialog.
+
+After that, Folio opens normally. You can also Control-click `Folio.app` in
+Finder, choose **Open**, then confirm **Open** as an alternative.
+
+If macOS instead says the app is damaged, remove its quarantine attribute in
+Terminal and then open it again:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Folio.app
