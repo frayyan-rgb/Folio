@@ -1,7 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardHeader } from "@/components/ui/card";
+import { hasDuplicateBookName } from "@/lib/books";
+import {
+  BookOpen,
+  FileText,
+  ImagePlus,
+  Plus,
+  Settings,
+  Trash2,
+} from "lucide-react";
 
-type Book = { name: string; path: string; image?: string };
+type Book = { name: string; path: string; image?: string; page?: number };
 type LocalAIStatus = "loaded" | "downloaded" | "none";
 type LocalAIModel = {
   id: string;
@@ -32,6 +41,7 @@ export default function HomeScreen({ onSelectBook }: Props) {
   const [isUnloadingModel, setIsUnloadingModel] = useState(false);
   const [isDeletingModel, setIsDeletingModel] = useState(false);
   const [localAIError, setLocalAIError] = useState<string | null>(null);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [modelLoadPhase, setModelLoadPhase] = useState<
     "downloading" | "loading" | null
@@ -40,6 +50,8 @@ export default function HomeScreen({ onSelectBook }: Props) {
     completedBytes: number | null;
     totalBytes: number | null;
   }>({ completedBytes: null, totalBytes: null });
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsCloseButtonRef = useRef<HTMLButtonElement>(null);
   const deleteImage = async (fileName: string) => {
     await window.electron.deleteImage(fileName);
     setBooks(
@@ -142,19 +154,21 @@ export default function HomeScreen({ onSelectBook }: Props) {
       const savedBooks = await window.electron.getBooks();
 
       // load image for each book
-      const booksWithImages = await Promise.all(
+      const booksWithDetails = await Promise.all(
         savedBooks.map(async (book) => {
-          const imageBuffer = await window.electron.getImage(book.name);
-          if (!imageBuffer) return book;
-          const blob = new Blob([new Uint8Array(imageBuffer)], {
-            type: "image/jpeg",
-          });
-          const imageUrl = URL.createObjectURL(blob);
-          return { ...book, image: imageUrl };
+          const [imageBuffer, page] = await Promise.all([
+            window.electron.getImage(book.name),
+            window.electron.getPage(book.name),
+          ]);
+          if (!imageBuffer) return { ...book, page };
+          const imageUrl = URL.createObjectURL(
+            new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }),
+          );
+          return { ...book, image: imageUrl, page };
         }),
       );
 
-      setBooks(booksWithImages);
+      setBooks(booksWithDetails);
     };
 
     const loadLocalAIStatus = async () => {
@@ -233,14 +247,57 @@ export default function HomeScreen({ onSelectBook }: Props) {
     return () => window.clearInterval(interval);
   }, [isLoadingModel]);
 
+  useEffect(() => {
+    if (!showSettings) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const focusFrame = window.requestAnimationFrame(() => {
+      settingsCloseButtonRef.current?.focus();
+    });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowSettings(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [showSettings]);
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Array.from(new Uint8Array(arrayBuffer));
-    const result = await window.electron.saveBook(buffer, file.name);
-    console.log("save result:", result); // add here
-    setBooks((prev) => [...prev, { name: file.name, path: result.path }]); // use real path
+
+    setLibraryError(null);
+    const isDuplicate = hasDuplicateBookName(books, file.name);
+    if (isDuplicate) {
+      setLibraryError("A PDF with this filename is already in your library.");
+      input.value = "";
+      return;
+    }
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Array.from(new Uint8Array(arrayBuffer));
+      const result = await window.electron.saveBook(buffer, file.name);
+      setBooks((prev) => [
+        ...prev,
+        { name: file.name, path: result.path, page: 1 },
+      ]);
+    } catch (error) {
+      console.error("Could not add PDF:", error);
+      const message = error instanceof Error ? error.message : "";
+      setLibraryError(
+        message.includes("already in your library")
+          ? "A PDF with this filename is already in your library."
+          : "Folio could not add this PDF. Check the file and try again.",
+      );
+    } finally {
+      input.value = "";
+    }
   };
   const handleImageChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -267,17 +324,42 @@ export default function HomeScreen({ onSelectBook }: Props) {
     onSelectBook(file);
   };
   const deleteCard = async (fileName: string) => {
-    await window.electron.deleteBook(fileName);
-    setBooks(books.filter((book) => book.name !== fileName));
+    const confirmed = window.confirm(
+      `Remove “${fileName}” and all of its saved data from your library?`,
+    );
+    if (!confirmed) return;
+    setLibraryError(null);
+    try {
+      await window.electron.deleteBook(fileName);
+      setBooks((currentBooks) =>
+        currentBooks.filter((book) => book.name !== fileName),
+      );
+    } catch (error) {
+      console.error("Could not delete PDF:", error);
+      setLibraryError("Folio could not remove this PDF. Please try again.");
+    }
   };
 
   return (
-    <div className="min-h-screen bg-[#1a1a1a] p-8">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-2xl font-bold text-[#f0f0f0]">My Library</h1>
+    <div className="folio-shell min-h-screen p-6 sm:p-8">
+      <div className="folio-glass mb-8 flex items-center justify-between gap-4 rounded-2xl px-4 py-3 sm:px-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--folio-border)] bg-[var(--folio-accent-soft)] text-[var(--folio-accent-strong)] shadow-sm">
+            <BookOpen size={21} strokeWidth={1.8} />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--folio-accent)]">
+              Folio
+            </p>
+            <h1 className="folio-heading text-2xl font-semibold text-[var(--folio-text)]">
+              My Library
+            </h1>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
-          <label className="cursor-pointer bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition">
-            + Add Book
+          <label className="folio-primary-button inline-flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition">
+            <Plus size={16} />
+            Add Book
             <input
               type="file"
               accept="application/pdf"
@@ -285,187 +367,142 @@ export default function HomeScreen({ onSelectBook }: Props) {
               className="hidden"
             />
           </label>
-          {loadedModel ? (
-            <>
-              <span className="text-sm text-green-400">{loadedModel.name} Loaded</span>
-              <button
-                type="button"
-                onClick={handleUnloadModel}
-                disabled={isUnloadingModel || isDeletingModel}
-                className="bg-white hover:bg-gray-100 disabled:opacity-50 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition"
-              >
-                {isUnloadingModel ? "Unloading Model..." : "Unload Model"}
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteModel}
-                disabled={isDeletingModel || isUnloadingModel}
-                className="bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-              >
-                {isDeletingModel ? "Deleting Model..." : "Delete Model"}
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={handleLoadModel}
-                disabled={isLoadingModel || isDeletingModel}
-                className="bg-white hover:bg-gray-100 disabled:opacity-50 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition"
-              >
-                {isLoadingModel
-                  ? localAIStatus === "downloaded"
-                    ? "Loading Model..."
-                    : "Downloading Model..."
-                  : localAIStatus === "downloaded"
-                    ? "Load Model"
-                    : "Download Model"}
-              </button>
-              {localAIStatus === "downloaded" && (
-                <button
-                  type="button"
-                  onClick={handleDeleteModel}
-                  disabled={isDeletingModel || isLoadingModel}
-                  className="bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-                >
-                  {isDeletingModel ? "Deleting Model..." : "Delete Model"}
-                </button>
-              )}
-            </>
-          )}
+          <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            className="folio-secondary-button inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition"
+          >
+            {loadedModel ? (
+              <span className="h-2 w-2 rounded-full bg-[var(--folio-success)]" />
+            ) : (
+              <Settings size={16} />
+            )}
+            {loadedModel ? "Local AI ready" : "Settings"}
+          </button>
         </div>
       </div>
 
+      {libraryError && (
+        <div
+          role="alert"
+          className="mb-5 rounded-xl border border-[var(--folio-danger)]/30 bg-white/35 px-4 py-3 text-sm text-[var(--folio-danger)]"
+        >
+          {libraryError}
+        </div>
+      )}
+
       {localAIError && (
-        <p className="-mt-5 mb-5 text-sm text-red-400">{localAIError}</p>
+        <p className="-mt-5 mb-5 text-sm text-[var(--folio-danger)]">{localAIError}</p>
       )}
 
-      <section className="mb-6 max-w-2xl rounded-xl border border-[#3a3a3a] bg-[#242424] p-4">
-        <div className="mb-3 flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-semibold text-[#f0f0f0]">Local AI model</h2>
-            <p className="text-xs text-[#9f9f9f]">Choose which private model Folio uses for explanations.</p>
-          </div>
-          <select
-            value={selectedModelId}
-            onChange={(event) => handleModelSelection(event.target.value)}
-            disabled={isLoadingModel || isUnloadingModel || isDeletingModel}
-            className="rounded-lg border border-[#555] bg-[#333] px-3 py-2 text-sm text-white disabled:opacity-50"
-          >
-            {models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name} — {model.size}
-              </option>
-            ))}
-          </select>
-        </div>
 
-        {selectedModel && (
-          <div className="rounded-lg bg-[#2e2e2e] p-3 text-sm">
-            <div className="mb-2 flex items-center gap-2 text-[#f0f0f0]">
-              <span className="font-medium">{selectedModel.name}</span>
-              <span className="text-[#aaa]">{selectedModel.size}</span>
-              {selectedModel.loaded ? (
-                <span className="text-green-400">Loaded</span>
-              ) : selectedModel.downloaded ? (
-                <span className="text-blue-300">Downloaded</span>
-              ) : (
-                <span className="text-[#aaa]">Not downloaded</span>
-              )}
+      {books.length === 0 ? (
+        <section className="folio-glass flex min-h-80 items-center justify-center rounded-3xl border-dashed px-6 py-12 text-center">
+          <div className="max-w-md">
+            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--folio-border)] bg-[var(--folio-surface-raised)] text-[var(--folio-accent-strong)]">
+              <BookOpen size={28} strokeWidth={1.7} />
             </div>
-            <p className="text-[#d0d0d0]">Best for: {selectedModel.advantage}</p>
-            <p className="mt-1 text-[#aaa]">Tradeoff: {selectedModel.drawback}</p>
+            <h2 className="folio-heading text-2xl font-semibold text-[var(--folio-text)]">
+              Start your library
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--folio-muted)]">
+              Add a PDF to read, save your place, and get private explanations
+              for highlighted passages.
+            </p>
+            <label className="folio-primary-button mt-6 inline-flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition">
+              <Plus size={16} />
+              Add your first PDF
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+            </label>
           </div>
-        )}
-
-        <div className="mt-3 space-y-1 text-xs text-[#aaa]">
-          {models.map((model) => (
-            <div key={model.id} className="flex items-center justify-between">
-              <span>{model.name} · {model.size}</span>
-              <span className={model.loaded ? "text-green-400" : model.downloaded ? "text-blue-300" : "text-[#888]"}>
-                {model.loaded ? "Loaded" : model.downloaded ? "Downloaded" : "Not downloaded"}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {isLoadingModel && modelLoadPhase && (
-        <div className="mb-6 max-w-sm">
-          <div className="mb-2 flex justify-between text-sm text-[#cfcfcf]">
-            <span>
-              {modelLoadPhase === "downloading"
-                ? "Downloading local AI model"
-                : "Loading local AI model"}
-            </span>
-            {downloadProgress !== null && <span>{downloadProgress}%</span>}
-          </div>
-          {downloadSize.completedBytes !== null &&
-            downloadSize.totalBytes !== null && (
-              <p className="mb-2 text-xs text-[#9f9f9f]">
-                {formatBytes(downloadSize.completedBytes)} /{" "}
-                {formatBytes(downloadSize.totalBytes)}
-              </p>
-            )}
-          <div className="h-2 overflow-hidden rounded-full bg-[#3a3a3a]">
-            <div
-              className="h-full rounded-full bg-white transition-all duration-300"
-              style={{ width: `${downloadProgress ?? 0}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-4 gap-4">
-        {books.map((book, i) => (
+        </section>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {books.map((book, i) => (
           <Card
             key={i}
-            className="cursor-pointer transition group relative"
-            style={{ backgroundColor: "#2a2a2a", border: "1px solid #333" }}
+            className="folio-book-card group relative cursor-pointer transition duration-200"
             onClick={() => handleOpenBook(book.path, book.name)}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open ${book.name}`}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                void handleOpenBook(book.path, book.name);
+              }
+            }}
           >
             {/* Delete button - subtle, hover only */}
             <button
+              type="button"
+              aria-label={`Remove ${book.name} from library`}
               onClick={(e) => {
                 e.stopPropagation();
                 deleteCard(book.name);
               }}
-              className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs cursor-pointer "
+              className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs cursor-pointer"
             >
-              ✕
+              <Trash2 size={13} />
             </button>
 
             <CardHeader className="p-3 overflow-hidden">
               {/* Cover image area */}
               <div
                 className="rounded-md h-48 mb-3 overflow-hidden"
-                style={{ backgroundColor: "#3a3a3a" }}
+                style={{ backgroundColor: "var(--folio-surface-raised)" }}
               >
                 {book.image ? (
                   <div className="relative w-full h-full group/img">
                     <img
                       src={book.image}
+                      alt={`Cover for ${book.name}`}
                       className="w-full h-full object-cover rounded-md"
                     />
                     <button
+                      type="button"
+                      aria-label={`Remove cover image for ${book.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteImage(book.name);
                       }}
-                      className="absolute top-1 right-1 opacity-0 group-hover/img:opacity-50 transition-opacity bg-black/60 hover:bg-red-500/80 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs cursor-pointer"
+                      className="absolute top-1 right-1 opacity-0 group-hover/img:opacity-100 focus-visible:opacity-100 transition-opacity bg-black/60 hover:bg-red-500/80 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs cursor-pointer"
                     >
-                      x
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 ) : (
                   <div
-                    className="w-full h-full flex items-center justify-center gap-2 text-sm font-normal text-white cursor-pointer"
+                    className="relative flex h-full w-full cursor-pointer flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-[#a47a62] via-[#78484a] to-[#432f32] px-4 text-center"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Add a cover image for ${book.name}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       document.getElementById(`cover-input-${i}`)?.click();
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        document.getElementById(`cover-input-${i}`)?.click();
+                      }
+                    }}
                   >
-                    📄 Choose Image
+                    <FileText className="mb-3 text-[#fff5e7]" size={34} strokeWidth={1.6} />
+                    <span className="line-clamp-3 text-sm font-semibold text-white">
+                      {book.name.replace(/_/g, " ").replace(".pdf", "")}
+                    </span>
+                    <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-[#ead9c5]">
+                      <ImagePlus size={13} />
+                      Add cover image
+                    </span>
                     <input
                       id={`cover-input-${i}`}
                       type="file"
@@ -482,15 +519,175 @@ export default function HomeScreen({ onSelectBook }: Props) {
               <div className="w-full overflow-hidden">
                 <p
                   className="break-words text-sm font-medium"
-                  style={{ color: "#f0f0f0" }}
+                  style={{ color: "var(--folio-text)" }}
                 >
                   {book.name.replace(/_/g, " ").replace(".pdf", "")}
+                </p>
+                <p className="mt-1 text-xs text-[var(--folio-muted)]">
+                  {book.page && book.page > 1
+                    ? `Continue on page ${book.page}`
+                    : "Not started"}
                 </p>
               </div>
             </CardHeader>
           </Card>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {showSettings && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#392c23]/35 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowSettings(false);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="local-ai-settings-title"
+            className="folio-glass-strong max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl p-6"
+          >
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  id="local-ai-settings-title"
+                  className="folio-heading text-2xl font-semibold text-[var(--folio-text)]"
+                >
+                  Local AI settings
+                </h2>
+                <p className="mt-1 text-sm text-[var(--folio-muted)]">
+                  Models run privately on this Mac. Download one before using
+                  explanations.
+                </p>
+              </div>
+              <button
+                ref={settingsCloseButtonRef}
+                type="button"
+                onClick={() => setShowSettings(false)}
+                className="rounded-lg px-2 py-1 text-xl leading-none text-[var(--folio-muted)] transition hover:bg-[var(--folio-accent-soft)] hover:text-[var(--folio-accent-strong)]"
+                aria-label="Close settings"
+              >
+                ×
+              </button>
+            </div>
+
+            {localAIError && (
+              <p className="mb-4 text-sm text-[var(--folio-danger)]">{localAIError}</p>
+            )}
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <label className="text-sm font-medium text-[var(--folio-text)]">
+                Model
+                <select
+                  value={selectedModelId}
+                  onChange={(event) => handleModelSelection(event.target.value)}
+                  disabled={isLoadingModel || isUnloadingModel || isDeletingModel}
+                  className="mt-2 block w-full rounded-xl border border-[var(--folio-border)] bg-[var(--folio-surface-raised)] px-3 py-2 text-sm text-[var(--folio-text)] shadow-inner disabled:opacity-50 sm:w-80"
+                >
+                  {models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} — {model.size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {loadedModel ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleUnloadModel}
+                      disabled={isUnloadingModel || isDeletingModel}
+                      className="folio-primary-button rounded-xl px-4 py-2 text-sm font-medium transition disabled:opacity-50"
+                    >
+                      {isUnloadingModel ? "Unloading…" : "Unload model"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteModel}
+                      disabled={isDeletingModel || isUnloadingModel}
+                      className="rounded-xl bg-[var(--folio-danger)] px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-50"
+                    >
+                      {isDeletingModel ? "Deleting…" : "Delete model"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleLoadModel}
+                      disabled={isLoadingModel || isDeletingModel}
+                      className="folio-primary-button rounded-xl px-4 py-2 text-sm font-medium transition disabled:opacity-50"
+                    >
+                      {isLoadingModel
+                        ? localAIStatus === "downloaded"
+                          ? "Loading…"
+                          : "Downloading…"
+                        : localAIStatus === "downloaded"
+                          ? "Load model"
+                          : "Download model"}
+                    </button>
+                    {localAIStatus === "downloaded" && (
+                      <button
+                        type="button"
+                        onClick={handleDeleteModel}
+                        disabled={isDeletingModel || isLoadingModel}
+                        className="rounded-xl bg-[var(--folio-danger)] px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-50"
+                      >
+                        {isDeletingModel ? "Deleting…" : "Delete model"}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {selectedModel && (
+              <div className="mt-5 rounded-xl border border-[var(--folio-border)] bg-[var(--folio-surface-raised)] p-4 text-sm">
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-[var(--folio-text)]">
+                  <span className="font-medium">{selectedModel.name}</span>
+                  <span className="text-[var(--folio-muted)]">{selectedModel.size}</span>
+                  <span className={selectedModel.loaded ? "text-[var(--folio-success)]" : selectedModel.downloaded ? "text-[var(--folio-accent)]" : "text-[var(--folio-muted)]"}>
+                    {selectedModel.loaded
+                      ? "Loaded"
+                      : selectedModel.downloaded
+                        ? "Downloaded"
+                        : "Not downloaded"}
+                  </span>
+                </div>
+                <p className="text-[var(--folio-text)]">Best for: {selectedModel.advantage}</p>
+                <p className="mt-1 text-[var(--folio-muted)]">Tradeoff: {selectedModel.drawback}</p>
+              </div>
+            )}
+
+            {isLoadingModel && modelLoadPhase && (
+              <div className="mt-5">
+                <div className="mb-2 flex justify-between text-sm text-[var(--folio-text)]">
+                  <span>
+                    {modelLoadPhase === "downloading"
+                      ? "Downloading local AI model"
+                      : "Loading local AI model"}
+                  </span>
+                  {downloadProgress !== null && <span>{downloadProgress}%</span>}
+                </div>
+                {downloadSize.completedBytes !== null &&
+                  downloadSize.totalBytes !== null && (
+                    <p className="mb-2 text-xs text-[var(--folio-muted)]">
+                      {formatBytes(downloadSize.completedBytes)} / {formatBytes(downloadSize.totalBytes)}
+                    </p>
+                  )}
+                <div className="h-2 overflow-hidden rounded-full bg-[var(--folio-accent-soft)]">
+                  <div
+                    className="h-full rounded-full bg-[var(--folio-accent-strong)] transition-all duration-300"
+                    style={{ width: `${downloadProgress ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
 
     </div>
   );

@@ -3,6 +3,13 @@ const path = require("node:path");
 const fs = require("fs");
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
+const {
+  deleteBookData,
+  getAnnotationsPath: getStoredAnnotationsPath,
+  getReadingProgress,
+  saveBookFile,
+  saveReadingProgress,
+} = require("./electron/book-storage.cjs");
 const isDev = !app.isPackaged;
 const LOCAL_AI_BASE_URL = "http://127.0.0.1:8080";
 const LOCAL_AI_MODELS = {
@@ -69,6 +76,8 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    title: "Folio",
+    icon: path.join(__dirname, "assets", "folio-icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -83,8 +92,7 @@ function createWindow() {
 }
 
 function getAnnotationsPath(bookId) {
-  const annotationsDir = path.join(app.getPath("userData"), "annotations");
-  return path.join(annotationsDir, `${encodeURIComponent(bookId)}.json`);
+  return getStoredAnnotationsPath(app.getPath("userData"), bookId);
 }
 
 function readAnnotations(bookId) {
@@ -123,11 +131,8 @@ app.on("before-quit", () => {
 });
 
 ipcMain.handle("save-book", async (event, buffer, fileName) => {
-  const booksDir = path.join(app.getPath("userData"), "books");
-  if (!fs.existsSync(booksDir)) fs.mkdirSync(booksDir);
-  const filePath = path.join(booksDir, fileName);
-  fs.writeFileSync(filePath, Buffer.from(buffer));
-  return { success: true, path: filePath }; // return the path
+  const filePath = saveBookFile(app.getPath("userData"), buffer, fileName);
+  return { success: true, path: filePath };
 });
 
 ipcMain.handle("get-books", async () => {
@@ -137,21 +142,12 @@ ipcMain.handle("get-books", async () => {
   return files.map((f) => ({ name: f, path: path.join(booksDir, f) }));
 });
 ipcMain.handle("save-page", async (event, fileName, pageNum) => {
-  const progressPath = path.join(app.getPath("userData"), "progress.json");
-  let progress = {};
-  if (fs.existsSync(progressPath)) {
-    progress = JSON.parse(fs.readFileSync(progressPath, "utf8"));
-  }
-  progress[fileName] = pageNum;
-  fs.writeFileSync(progressPath, JSON.stringify(progress));
+  saveReadingProgress(app.getPath("userData"), fileName, pageNum);
   return { success: true };
 });
 
 ipcMain.handle("get-page", async (event, fileName) => {
-  const progressPath = path.join(app.getPath("userData"), "progress.json");
-  if (!fs.existsSync(progressPath)) return 1;
-  const progress = JSON.parse(fs.readFileSync(progressPath, "utf8"));
-  return progress[fileName] || 1;
+  return getReadingProgress(app.getPath("userData"), fileName);
 });
 
 ipcMain.handle("save-image", async (event, buffer, fileName) => {
@@ -179,10 +175,8 @@ ipcMain.handle("read-book", async (event, filePath) => {
 });
 
 ipcMain.handle("delete-book", async (event, fileName) => {
-  const booksDir = path.join(app.getPath("userData"), "books");
-  fs.unlinkSync(path.join(booksDir, fileName));
-  const annotationsPath = getAnnotationsPath(fileName);
-  if (fs.existsSync(annotationsPath)) fs.unlinkSync(annotationsPath);
+  deleteBookData(app.getPath("userData"), fileName);
+  return { success: true };
 });
 
 ipcMain.handle("save-annotation", async (_event, bookId, annotation) => {

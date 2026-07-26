@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getLocalAIUnavailableMessage } from "@/lib/explanations";
 
 type Props = {
   text: string;
@@ -17,6 +18,11 @@ type Props = {
 
 const CONTEXT_MODE_STORAGE_KEY = "folio-use-surrounding-context";
 const DROP_TARGET_PADDING = 16;
+const VIEWPORT_PADDING = 16;
+const HEADER_OFFSET = 85;
+
+const clamp = (value: number, minimum: number, maximum: number) =>
+  Math.max(minimum, Math.min(value, Math.max(minimum, maximum)));
 
 const isPointNearRect = (x: number, y: number, rect: DOMRect) =>
   x >= rect.left - DROP_TARGET_PADDING &&
@@ -39,6 +45,7 @@ const ExplainButton = ({
   onClose,
 }: Props) => {
   const [explanation, setExplanation] = useState<string | null>(initialExplanation ?? null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(Boolean(initialExplanation));
   const [isAbsorbing, setIsAbsorbing] = useState(false);
   const [isOverSelection, setIsOverSelection] = useState(false);
@@ -55,22 +62,40 @@ const ExplainButton = ({
   const [position, setPosition] = useState<{ x: number; y: number } | null>(
     null,
   );
+  const [viewport, setViewport] = useState({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
   const popupRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
-  const popupWidth = explanation ? 320 : 150;
-  const popupHeight = explanation ? 270 : 50;
+  const hasExpandedContent = Boolean(explanation || errorMessage);
+  const popupWidth = hasExpandedContent ? 320 : 210;
+  const popupHeight = explanation ? 270 : errorMessage ? 190 : 78;
 
   const clampedLeft = explanation
-    ? window.innerWidth - popupWidth - 16 // top right when explanation shows
-    : Math.min(x, window.innerWidth - popupWidth - 16); // near selection otherwise
+    ? clamp(
+        viewport.width - popupWidth - VIEWPORT_PADDING,
+        VIEWPORT_PADDING,
+        viewport.width - popupWidth - VIEWPORT_PADDING,
+      )
+    : clamp(
+        x,
+        VIEWPORT_PADDING,
+        viewport.width - popupWidth - VIEWPORT_PADDING,
+      );
 
   const clampedTop = explanation
-    ? 85 // below the header
-    : Math.min(y - 50, window.innerHeight - popupHeight - 50);
+    ? HEADER_OFFSET
+    : clamp(
+        y - popupHeight - 8,
+        HEADER_OFFSET,
+        viewport.height - popupHeight - VIEWPORT_PADDING,
+      );
 
   const handleExplain = async () => {
     setLoading(true);
+    setErrorMessage(null);
 
     try {
       const result = await window.electron.explainText(
@@ -81,8 +106,8 @@ const ExplainButton = ({
       setExplanation(result);
     } catch (error) {
       console.error("Local AI error:", error);
-      setExplanation(
-        "Local AI is unavailable. Make sure the local AI server is running.",
+      setErrorMessage(
+        getLocalAIUnavailableMessage("explanation"),
       );
     } finally {
       setLoading(false);
@@ -122,7 +147,7 @@ const ExplainButton = ({
         {
           question,
           answer:
-            "Local AI is unavailable. Make sure the local AI server is running.",
+            getLocalAIUnavailableMessage("follow-up"),
         },
       ]);
     } finally {
@@ -138,6 +163,40 @@ const ExplainButton = ({
     }
   }, [followUps, isAskingFollowUp]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+      const rect = popupRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPosition((current) => {
+        if (!current) return null;
+        const next = {
+          x: clamp(
+            current.x,
+            VIEWPORT_PADDING,
+            window.innerWidth - rect.width - VIEWPORT_PADDING,
+          ),
+          y: clamp(
+            current.y,
+            HEADER_OFFSET,
+            window.innerHeight - rect.height - VIEWPORT_PADDING,
+          ),
+        };
+        return next.x === current.x && next.y === current.y ? current : next;
+      });
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   const handleDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = popupRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -152,8 +211,16 @@ const ExplainButton = ({
     if (!rect) return;
 
     setPosition({
-      x: Math.max(0, Math.min(event.clientX - dragOffset.current.x, window.innerWidth - rect.width)),
-      y: Math.max(0, Math.min(event.clientY - dragOffset.current.y, window.innerHeight - rect.height)),
+      x: clamp(
+        event.clientX - dragOffset.current.x,
+        VIEWPORT_PADDING,
+        window.innerWidth - rect.width - VIEWPORT_PADDING,
+      ),
+      y: clamp(
+        event.clientY - dragOffset.current.y,
+        HEADER_OFFSET,
+        window.innerHeight - rect.height - VIEWPORT_PADDING,
+      ),
     });
     const currentSelectionRects = getSelectionRects?.() ?? selectionRects;
     const isOverTarget = currentSelectionRects.some(
@@ -225,20 +292,19 @@ const ExplainButton = ({
         left: position?.x ?? clampedLeft,
         zIndex: 9999,
         backgroundColor: isOverSelection
-          ? "rgba(24, 28, 35, 0.28)"
-          : "#1e1e1e",
+          ? "rgba(248, 240, 227, 0.38)"
+          : "rgba(249, 244, 235, 0.9)",
         border: isOverSelection
-          ? "1px solid rgba(250, 204, 21, 0.9)"
-          : "1px solid #555",
+          ? "1px solid rgba(164, 126, 70, 0.9)"
+          : "1px solid var(--folio-border)",
         boxShadow: isOverSelection
-          ? "0 8px 40px rgba(96, 165, 250, 0.3), inset 0 0 24px rgba(255,255,255,0.06)"
-          : "0 8px 32px rgba(0,0,0,0.6)",
-        backdropFilter: isOverSelection ? "blur(5px) saturate(140%)" : "none",
-        WebkitBackdropFilter: isOverSelection
-          ? "blur(5px) saturate(140%)"
-          : "none",
+          ? "0 12px 42px rgba(108, 52, 56, 0.22), inset 0 1px 0 rgba(255,255,255,0.8)"
+          : "0 18px 52px rgba(62, 43, 28, 0.22), inset 0 1px 0 rgba(255,255,255,0.82)",
+        backdropFilter: "blur(24px) saturate(130%)",
+        WebkitBackdropFilter: "blur(24px) saturate(130%)",
         opacity: isAbsorbing ? 0 : isOverSelection ? 0.58 : 1,
-        width: explanation ? "320px" : "auto",
+        width: hasExpandedContent ? "320px" : "auto",
+        maxWidth: "calc(100vw - 32px)",
         maxHeight: "calc(100vh - 100px)",
         minWidth: explanation ? "280px" : undefined,
         minHeight: explanation ? "180px" : undefined,
@@ -253,7 +319,7 @@ const ExplainButton = ({
     >
       {!explanation ? (
         <div className="flex flex-col p-2">
-          <label className="mb-1 flex cursor-pointer items-center gap-2 px-2 text-xs text-[#aaa]">
+          <label className="mb-1 flex cursor-pointer items-center gap-2 px-2 text-xs text-[var(--folio-muted)]">
             <input
               type="checkbox"
               checked={useContext}
@@ -266,8 +332,8 @@ const ExplainButton = ({
             disabled={loading}
             className="disabled:opacity-50 text-sm font-medium px-4 py-2 rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 flex items-center gap-2"
             style={{
-              backgroundColor: "#1e1e1e",
-              color: "#f0f0f0",
+              background: "linear-gradient(145deg, #743c40, #5d2f33)",
+              color: "#fffaf1",
               cursor: "pointer",
               border: "none",
             }}
@@ -299,6 +365,14 @@ const ExplainButton = ({
             <>✨ Explain this</>
           )}
           </button>
+          {errorMessage && (
+            <div
+              role="alert"
+              className="mx-2 mb-2 mt-1 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100"
+            >
+              {errorMessage}
+            </div>
+          )}
         </div>
       ) : (
         <div
@@ -308,7 +382,7 @@ const ExplainButton = ({
           }}
         >
           <div
-            className="m-4 mb-3 flex cursor-move items-center justify-between select-none text-xs text-[#888]"
+            className="m-4 mb-3 flex cursor-move items-center justify-between select-none text-xs text-[var(--folio-muted)]"
             onPointerDown={handleDragStart}
             onPointerMove={handleDragMove}
             onPointerUp={(event) => void handleDragEnd(event)}
@@ -319,7 +393,7 @@ const ExplainButton = ({
               {onDelete && (
                 <button
                   type="button"
-                  className="cursor-pointer text-[#d98b8b] hover:text-[#ffaaaa]"
+                  className="cursor-pointer text-[var(--folio-danger)] hover:brightness-110"
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={() => void onDelete()}
                 >
@@ -330,7 +404,7 @@ const ExplainButton = ({
               <button
                 type="button"
                 aria-label="Close explanation"
-                className="cursor-pointer text-base leading-none text-[#aaa] hover:text-white"
+                className="cursor-pointer text-base leading-none text-[var(--folio-muted)] hover:text-[var(--folio-accent-strong)]"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={onClose}
               >
@@ -339,42 +413,42 @@ const ExplainButton = ({
             </div>
           </div>
           <div ref={conversationRef} className="min-h-0 flex-1 overflow-y-auto px-4">
-            <p className="text-xs font-semibold mb-2" style={{ color: "#888" }}>
+            <p className="mb-2 text-xs font-semibold text-[var(--folio-muted)]">
               "{text}"
             </p>
-            <p className="text-sm leading-relaxed" style={{ color: "#f0f0f0" }}>
+            <p className="text-sm leading-relaxed text-[var(--folio-text)]">
               {explanation}
             </p>
             {followUps.map((turn, index) => (
-              <div key={`${turn.question}-${index}`} className="mt-4 border-t border-[#444] pt-3">
-                <p className="text-xs font-medium text-[#aaa]">You</p>
-                <p className="mt-1 text-sm text-[#f0f0f0]">{turn.question}</p>
-                <p className="mt-2 text-xs font-medium text-[#888]">Folio</p>
-                <p className="mt-1 text-sm leading-relaxed text-[#f0f0f0]">{turn.answer}</p>
+              <div key={`${turn.question}-${index}`} className="mt-4 border-t border-[var(--folio-border)] pt-3">
+                <p className="text-xs font-medium text-[var(--folio-muted)]">You</p>
+                <p className="mt-1 text-sm text-[var(--folio-text)]">{turn.question}</p>
+                <p className="mt-2 text-xs font-medium text-[var(--folio-accent)]">Folio</p>
+                <p className="mt-1 text-sm leading-relaxed text-[var(--folio-text)]">{turn.answer}</p>
               </div>
             ))}
             {isAskingFollowUp && pendingQuestion && (
-              <div className="mt-4 border-t border-[#444] pt-3">
-                <p className="text-xs font-medium text-[#aaa]">You</p>
-                <p className="mt-1 text-sm text-[#f0f0f0]">{pendingQuestion}</p>
-                <p className="mt-2 text-sm text-[#aaa]">Folio is thinking…</p>
+              <div className="mt-4 border-t border-[var(--folio-border)] pt-3">
+                <p className="text-xs font-medium text-[var(--folio-muted)]">You</p>
+                <p className="mt-1 text-sm text-[var(--folio-text)]">{pendingQuestion}</p>
+                <p className="mt-2 text-sm text-[var(--folio-muted)]">Folio is thinking…</p>
               </div>
             )}
           </div>
           <form
-            className="m-4 mt-3 flex gap-2 border-t border-[#444] pt-3"
+            className="m-4 mt-3 flex gap-2 border-t border-[var(--folio-border)] pt-3"
             onSubmit={handleFollowUp}
           >
             <input
               value={followUp}
               onChange={(event) => setFollowUp(event.target.value)}
               placeholder="Ask a follow-up…"
-              className="min-w-0 flex-1 rounded-lg border border-[#555] bg-[#2a2a2a] px-3 py-2 text-sm text-[#f0f0f0] outline-none placeholder:text-[#888]"
+              className="min-w-0 flex-1 rounded-xl border border-[var(--folio-border)] bg-white/45 px-3 py-2 text-sm text-[var(--folio-text)] outline-none placeholder:text-[var(--folio-muted)]"
             />
             <button
               type="submit"
               disabled={!followUp.trim() || isAskingFollowUp}
-              className="rounded-lg bg-white px-3 py-2 text-sm font-medium text-[#111] disabled:opacity-40"
+              className="folio-primary-button rounded-xl px-3 py-2 text-sm font-medium disabled:opacity-40"
             >
               {isAskingFollowUp ? "Asking..." : "Send"}
             </button>

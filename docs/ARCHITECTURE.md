@@ -18,7 +18,8 @@ preload.js (context bridge)
     │ Electron IPC
     ▼
 main.cjs
-    ├── local application data: books, images, progress, annotations, models
+    ├── electron/book-storage.cjs: books, images, progress, annotations
+    ├── local application data and model settings
     └── llama.cpp server: local explanations and follow-up answers
 ```
 
@@ -34,6 +35,8 @@ the underlying work.
 | `src/App.tsx`       | Switches between the library and PDF-reader views; configures the PDF.js worker. |
 | `main.cjs`          | Creates Electron windows and registers every IPC handler.                        |
 | `preload.js`        | Exposes the safe `window.electron` API to the renderer.                          |
+| `electron/book-storage.cjs` | Implements testable book and reading-data persistence.                 |
+| `scripts/start.cjs` | Starts Vite, waits until it is reachable, and then launches Electron.             |
 | `src/electron.d.ts` | TypeScript definitions for the preload API and annotations.                      |
 
 ## User interface
@@ -45,9 +48,11 @@ the underlying work.
 - Lists locally stored PDF books and their optional cover images.
 - Imports a selected PDF, then asks the main process to save it.
 - Opens a book by reading it through IPC and recreating it as a browser `File`.
-- Deletes books and their cover images.
-- Displays local-AI model state and lets the user download, load, unload, or
-  delete a model.
+- Rejects duplicate filenames without replacing the existing book.
+- Deletes a book together with its cover, progress, and annotations after
+  confirmation.
+- Opens a Settings dialog for downloading, selecting, loading, unloading, and
+  deleting local-AI models.
 
 ### PDF reader
 
@@ -55,6 +60,10 @@ the underlying work.
 It restores the saved page for a book on open and saves the current page after
 navigation. It also extracts the current page's text, which the annotation
 system uses to construct explanation context.
+
+The reader supports toolbar controls, direct page entry, left/right arrow-key
+navigation, and zooming. Loading and rendering failures are shown in the reader
+instead of leaving an empty page.
 
 ### Highlights and explanations
 
@@ -73,7 +82,8 @@ The component sends the selected text to `ExplainButton.tsx`, which:
 ## Persistence
 
 All persistent data is stored under Electron's `app.getPath("userData")`
-directory. Folio creates these paths as needed:
+directory. On macOS this is normally
+`~/Library/Application Support/Folio`. Folio creates these paths as needed:
 
 | Path                      | Contents                                                                 |
 | ------------------------- | ------------------------------------------------------------------------ |
@@ -84,8 +94,11 @@ directory. Folio creates these paths as needed:
 | `models/`                 | Downloaded GGUF model files.                                             |
 | `local-ai-settings.json`  | Selected model ID.                                                       |
 
-Deleting a book also deletes its annotation file. The current implementation
-does not remove its saved progress or cover image automatically.
+Deleting a book also removes its annotation file, saved progress, and cover
+image so the application-data directory does not accumulate orphaned records.
+The selected model and downloaded model files persist between launches, but the
+local server process intentionally stops when Folio exits and must be loaded
+again in Settings on the next launch.
 
 ## IPC API
 
@@ -123,10 +136,24 @@ to the local loopback address, so it is not exposed to the local network.
 
 Vite builds the React renderer into `dist/`. Electron Forge packages the
 application and includes `resources/llama` as an extra runtime resource. The
-included native server is currently laid out for macOS Apple silicon.
+included native server is currently laid out for macOS Apple silicon. Source,
+tests, documentation, and the large `llama.cpp` development checkout are
+excluded from the application bundle. `npm run package` and `npm run make`
+always rebuild the renderer first, so they cannot silently package a stale UI.
 
 ```bash
-npm run build
+npm test
+npm run lint
 npm run start
 npm run make -- --arch arm64
 ```
+
+`npm run make -- --arch arm64` creates a DMG and ZIP under `out/make/`. Local
+artifacts receive an ad-hoc signature so their bundle integrity can be checked,
+but they are not signed with an Apple Developer ID or notarized. Developer ID
+signing and notarization should be configured before presenting a public
+release as a fully trusted macOS download.
+
+The tests use Node's built-in test runner. Storage tests operate inside isolated
+temporary application-data directories, while UI-logic tests cover duplicate
+book names, reader page boundaries, and local-AI recovery guidance.

@@ -188,7 +188,9 @@ const getAnchor = (range: Range): RangeAnchor | null => {
     : null;
 };
 
-const getTextNodeAtOffset = (span: Element, offset: number) => {
+const getTextNodeAtOffset = (span: Element | undefined, offset: number) => {
+  if (!span || !Number.isInteger(offset) || offset < 0) return null;
+
   const walker = document.createTreeWalker(span, NodeFilter.SHOW_TEXT);
   let node = walker.nextNode();
   let remaining = offset;
@@ -203,13 +205,27 @@ const getTextNodeAtOffset = (span: Element, offset: number) => {
 
 const getRangeFromAnchor = (anchor: RangeAnchor) => {
   const spans = getTextSpans();
+  if (
+    anchor.startItemIndex < 0 ||
+    anchor.endItemIndex < 0 ||
+    anchor.startItemIndex >= spans.length ||
+    anchor.endItemIndex >= spans.length
+  ) {
+    return null;
+  }
+
   const start = getTextNodeAtOffset(spans[anchor.startItemIndex], anchor.startOffset);
   const end = getTextNodeAtOffset(spans[anchor.endItemIndex], anchor.endOffset);
   if (!start || !end) return null;
-  const range = document.createRange();
-  range.setStart(start.node, start.offset);
-  range.setEnd(end.node, end.offset);
-  return range;
+
+  try {
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    return range;
+  } catch {
+    return null;
+  }
 };
 
 const SaveHighlighted = ({ pageText, bookId, pageNumber }: Props) => {
@@ -228,9 +244,19 @@ const SaveHighlighted = ({ pageText, bookId, pageNumber }: Props) => {
   } | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     window.electron.getAnnotations(bookId).then((saved) => {
-      setAnnotations(saved.filter((annotation) => annotation.pageNumber === pageNumber));
+      if (!cancelled) {
+        setAnnotations(
+          saved.filter((annotation) => annotation.pageNumber === pageNumber),
+        );
+      }
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [bookId, pageNumber]);
 
   useEffect(() => {
@@ -400,17 +426,17 @@ const SaveHighlighted = ({ pageText, bookId, pageNumber }: Props) => {
       )}
       <style>{`
         ::highlight(folio-annotation) {
-          background-color: rgba(250, 204, 21, 0.42);
+          background-color: rgba(213, 174, 78, 0.42);
           color: inherit;
           cursor: pointer;
         }
         ::highlight(folio-drop-target) {
-          background-color: rgba(96, 165, 250, 0.18);
-          text-shadow: 0 0 8px rgba(96, 165, 250, 0.95);
+          background-color: rgba(213, 174, 78, 0.25);
+          text-shadow: 0 0 8px rgba(164, 126, 70, 0.72);
         }
         ::highlight(folio-drop-target-active) {
-          background-color: rgba(250, 204, 21, 0.5);
-          text-shadow: 0 0 14px rgba(250, 204, 21, 1);
+          background-color: rgba(177, 117, 63, 0.48);
+          text-shadow: 0 0 14px rgba(138, 90, 68, 0.82);
         }
       `}</style>
     </>
