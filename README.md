@@ -50,7 +50,7 @@ available models are:
 
 ## Install
 
-Download a release from the
+Download the latest release from the
 [Folio releases page](https://github.com/frayyan-rgb/Folio/releases).
 
 ### Opening Folio on macOS
